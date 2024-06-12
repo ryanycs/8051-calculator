@@ -7,7 +7,7 @@
 #define TH0_R (Treload >> 8)
 #define TL0_R (Treload & 0xff)
 
-#define MAX_STACK_SIZE 8
+#define MAX_STACK_SIZE 5
 #define MAX_INFIX_EXPR_SIZE 15
 #define MAX_HISTORY_SIZE 5
 #define PRESS_AND_HOLD_THRESHOLD 1000
@@ -46,8 +46,9 @@ char decode(char key);
 void timer0(void) __interrupt(1) __using(2);
 short calc(short a, short b, char op);
 short infix_eval(char *infix);
-void execute(char ch);
+void parse(char ch);
 
+/* Initialize the 8051 timer and interrupt */
 void init(void) {
     TMOD = 0x01; // timer 0, mode 1
 
@@ -59,6 +60,7 @@ void init(void) {
     ET0 = 1; // enable timer 0 interrupt
 }
 
+/* Get the key from 4x4 keypad */
 char input(void) {
     for (char i = 0; i < 4; ++i) {
         char mask = 1 << i;
@@ -74,7 +76,7 @@ char input(void) {
     return 0xff;
 }
 
-/* Debounce */
+/* Get and decode the key from 4x4 keypad */
 char get_key(void) {
     char key;
     short cnt = 0;
@@ -109,14 +111,15 @@ char get_key(void) {
     }
 }
 
+/* Decode the key from 4x4 keypad */
 char decode(char key) {
     /*
-       HOLD            PRESS
+       PRESS           HOLD
     -----------     -----------
-    | M . . A |     | 7 8 9 / |
-    | . . . B | <-> | 4 5 6 x |
-    | . . . C |     | 1 2 3 - |
-    | . F E D |     | 0   = + |
+    | 7 8 9 / |     | M . . A |
+    | 4 5 6 x | <-> | . . . B |
+    | 1 2 3 - |     | . . . C |
+    | 0 H = + |     | . F E D |
     -----------     -----------
     */
     switch (key) {
@@ -147,7 +150,7 @@ char decode(char key) {
     case 12:
         return press_and_hold ? ' ' : '0';
     case 13:
-        return press_and_hold ? 'F' : ' ';
+        return press_and_hold ? 'F' : 'H';
     case 14:
         return press_and_hold ? 'E' : '=';
     case 15:
@@ -271,11 +274,12 @@ short infix_eval(char *infix) {
     return num_stack[0];
 }
 
-/* Execute the operation */
-void execute(char ch) {
-    static short led_num = 0; // input number to display in 7-segment led
-    static char base_idx = 0; // index for bases
-    char led_idx;             // index for 7-segment led
+/* Parse the input character */
+void parse(char ch) {
+    static short led_num = 0;    // input number to display in 7-segment led
+    static char base_idx = 0;    // index for bases
+    static char history_idx = 0; // index for history
+    char led_idx;                // index for 7-segment led
     short tmp;
 
     switch (ch) {
@@ -392,6 +396,13 @@ void execute(char ch) {
         short result = infix_eval(infix_expr);
         __sbit is_negative = result < 0;
 
+        /* Add the result to the history */
+        history[history_rear] = result;
+        history_rear = (history_rear + 1) % MAX_HISTORY_SIZE;
+        if (history_rear == history_front) {
+            history_front = (history_front + 1) % MAX_HISTORY_SIZE;
+        }
+
         /* Display the result */
         if (is_negative) {
             result = -result;
@@ -408,16 +419,30 @@ void execute(char ch) {
             set(0x40, led_idx--);
         }
 
-        /* Add the result to the history */
-        history[history_rear] = result;
-        history_rear = (history_rear + 1) % MAX_HISTORY_SIZE;
-        if (history_rear == history_front) {
-            history_front = (history_front + 1) % MAX_HISTORY_SIZE;
-        }
-
         /* Clear the infix expression */
         memset(infix_expr, 0, sizeof(infix_expr));
         infix_expr_len = 0;
+
+        /* Reset history_idx*/
+        history_idx = history_rear - 1 < 0 ? MAX_HISTORY_SIZE - 1 : history_rear - 1;
+        break;
+    case 'H':
+        tmp = history[history_idx];
+
+        /* Update the history index */
+        if (history_idx == history_front) {
+            history_idx = history_rear - 1 < 0 ? MAX_HISTORY_SIZE - 1 : history_rear - 1;
+        } else {
+            history_idx = history_idx - 1 < 0 ? MAX_HISTORY_SIZE - 1 : history_idx - 1;
+        }
+
+        /* Display the history result */
+        memset(led, 0xff, sizeof(led));
+        led_idx = 7;
+        do {
+            set(seven_seg[tmp % base], led_idx--);
+            tmp /= base;
+        } while (tmp > 0);
         break;
     case 'M':
         /* Clear the infix expression */
@@ -449,10 +474,12 @@ void execute(char ch) {
 }
 
 void main(void) {
+    char ch;
+
     init();
 
     while (1) {
-        char ch = get_key();
-        execute(ch);
+        ch = get_key();
+        parse(ch);
     }
 }
