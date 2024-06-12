@@ -7,6 +7,7 @@ TARGET = $(ODIR)/8051-calculator
 
 # rm command for Windows and Unix
 ifeq ($(OS), Windows_NT)
+	SHELL = cmd
 	rm = del /f /q
 	mkdir = if not exist $(ODIR) mkdir
 else
