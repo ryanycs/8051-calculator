@@ -7,9 +7,9 @@
 #define TH0_R (Treload >> 8)
 #define TL0_R (Treload & 0xff)
 
-#define MAX_STACK_SIZE 5
+#define MAX_STACK_SIZE 3
 #define MAX_INFIX_EXPR_SIZE 15
-#define MAX_HISTORY_SIZE 5
+#define MAX_HISTORY_SIZE 3
 #define PRESS_AND_HOLD_THRESHOLD 1000
 
 #define set(n, pos) led[pos] = n
@@ -32,6 +32,9 @@ char base = 10;
 char infix_expr[MAX_INFIX_EXPR_SIZE];
 char infix_expr_len = 0;
 
+/* floating point for division */
+short floating_part;
+
 /* circular queue for calculator history */
 short history[MAX_HISTORY_SIZE];
 char history_front = 0;
@@ -39,6 +42,7 @@ char history_rear = 0;
 
 __sbit press_and_hold;
 __sbit error;
+__sbit has_floating_point;
 
 void init(void);
 char input(void);
@@ -193,7 +197,15 @@ short calc(short a, short b, char op) {
             error = 1;
             return 0;
         }
-        return a / b;
+
+        float res = (float)a / b;
+        short integer_part = (short)res;
+        if (res - integer_part != 0) {
+            has_floating_point = 1;
+            floating_part = (res - integer_part) * 1000;
+        }
+
+        return integer_part;
     }
     return 0;
 }
@@ -441,14 +453,27 @@ void parse(char ch) {
             history_front = (history_front + 1) % MAX_HISTORY_SIZE;
         }
 
+        led_idx = 7;
+        memset(led, 0xff, sizeof(led));
+
+        /* Check whether the result has a floating point */
+        if (has_floating_point) {
+            if (floating_part < 0) {
+                floating_part = -floating_part;
+            }
+            do {
+                set(seven_seg[floating_part % base], led_idx--);
+                floating_part /= base;
+            } while (floating_part > 0);
+        }
+
         /* Display the result */
         if (is_negative) {
             result = -result;
         }
-        memset(led, 0xff, sizeof(led));
-        led_idx = 7;
         do {
-            set(seven_seg[result % base], led_idx--);
+            set(seven_seg[result % base] | has_floating_point << 7, led_idx--);
+            has_floating_point = 0;
             result /= base;
         } while (result > 0);
 
